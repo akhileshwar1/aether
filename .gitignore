@@ -1,0 +1,74 @@
+# ─────────────────────────────
+# Build artifacts
+# ─────────────────────────────
+/build/
+/out/
+/bin/
+/lib/
+/dist/
+/CMakeFiles/
+/CMakeCache.txt
+/cmake_install.cmake
+/Makefile
+/*.a
+/*.so
+/*.so.*
+/*.dll
+/*.exe
+/*.dylib
+
+# ─────────────────────────────
+# Object / intermediate files
+# ─────────────────────────────
+*.o
+*.obj
+*.lo
+*.lai
+*.la
+
+# ─────────────────────────────
+# Logs and runtime files
+# ─────────────────────────────
+*.log
+*.pid
+*.seed
+*.core
+core
+*.stackdump
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# ─────────────────────────────
+# Dependency and external tools
+# ─────────────────────────────
+# Conan / vcpkg / pkg managers
+/conanbuildinfo.*
+/vcpkg_installed/
+/vcpkg-*
+/*.cmake.user
+/.cache/
+/.cache/
+/.ccls-cache/
+/clangd/
+
+# ─────────────────────────────
+# Project-specific logs / data
+# ─────────────────────────────
+# Aether runtime logs or test outputs
+/logs/
+/data/
+/tmp/
+/wal/
+/*.wal
+/*.jsonl
+/*.dat
+
+# ─────────────────────────────
+# Generated files
+# ─────────────────────────────
+*.out
+*.test
+*.profraw
+*.profdata
