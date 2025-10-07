@@ -1,5 +1,6 @@
 // main.cpp
 #include "event_queue.h"
+#include "utils.h"
 #include "orderbook.h"
 #include "rest_client.h"
 #include "ws_client.h"
@@ -29,13 +30,9 @@ int main(int argc, char** argv) {
   // start ws reader thread
   std::thread ws_thread = start_ws_reader(symbol, updateSpeed, queue, stopFlag);
 
-  // wait for first buffered event and note U
-  std::cerr << "[main] waiting for first depthUpdate event...\n";
-  uint64_t firstU = 0;
-  while (true) {
-    if (queue.peek_first_U(firstU)) break;
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
+  
+  // Wait for initial buffered events per Binance spec
+  uint64_t firstU = wait_for_initial_buffer(queue, /*min_events=*/5, /*timeout_ms=*/500);
   std::cerr << "[main] noted first event U = " << firstU << "\n";
 
   // setup io_context and ssl ctx for REST
@@ -125,6 +122,7 @@ int main(int argc, char** argv) {
     JsonEvent ev = queue.pop_blocking();
     uint64_t U = ev.j.at("U").get<uint64_t>();
     uint64_t u = ev.j.at("u").get<uint64_t>();
+    std::cerr << "[ws] incoming U=" << U << " u=" << u << " book=" << book.lastUpdateId() << "\n";
     if (u < book.lastUpdateId()) continue;
     if (U > book.lastUpdateId() + 1) {
       std::cerr << "[main] SEQ GAP DETECTED. Need resync. Exiting.\n";
@@ -137,6 +135,7 @@ int main(int argc, char** argv) {
       stopFlag.store(true);
       break;
     }
+    book.printTop(5);
     ++liveCounter;
     if (liveCounter % 10000 == 0) {
       std::cerr << "[main] applied " << liveCounter << " live events. book_update_id=" << book.lastUpdateId() << " levels=" << book.totalLevels() << "\n";

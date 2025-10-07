@@ -58,6 +58,7 @@ std::thread start_ws_reader(const std::string &symbol,
         }
         std::string msg = beast::buffers_to_string(buffer.data());
         uint64_t now_us = mono_now_us();
+        // std::cerr << "[ws_reader] raw: " << msg << "\n";
         try {
           json j = json::parse(msg);
           if (j.contains("e") && j["e"] == "depthUpdate") {
