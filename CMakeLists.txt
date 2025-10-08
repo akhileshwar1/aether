@@ -15,6 +15,7 @@ add_executable(aether_binance_depth
   src/orderbook.cpp
   src/rest_client.cpp
   src/ws_client.cpp
+  src/ring_mmap.cpp
   src/main.cpp
 )
 

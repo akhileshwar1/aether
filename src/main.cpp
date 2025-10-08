@@ -4,6 +4,7 @@
 #include "orderbook.h"
 #include "rest_client.h"
 #include "ws_client.h"
+#include "ring_mmap.h"
 
 #include <iostream>
 #include <thread>
@@ -11,10 +12,16 @@
 #include <vector>
 #include <nlohmann/json.hpp>
 
+
 using json = nlohmann::json;
 using namespace aether;
-
-
+using aether::ring::RingHandle;
+using aether::ring::create_ring;
+using aether::ring::open_ring;
+using aether::ring::close_ring;
+using aether::ring::publish_message;
+using aether::ring::publish_snapshot_json;
+using aether::ring::ring_buf_size;
 
 int main(int argc, char** argv) {
   if (argc < 2) {
@@ -23,9 +30,26 @@ int main(int argc, char** argv) {
   }
   std::string symbol = argv[1];
   std::string updateSpeed = (argc >= 3 ? argv[2] : "");
+  std::string ring_path = (argc >= 4 ? argv[3] : "/dev/shm/aether.byte.ring");
+  size_t ring_buf_size = 8 * 1024 * 1024; // 8MB (tune as required)
 
   EventQueue queue;
   std::atomic<bool> stopFlag{false};
+
+  // Create or open ring using the C++ API
+  RingHandle *ring = nullptr;
+  ring = create_ring(ring_path.c_str(), ring_buf_size);
+  if (!ring) {
+    std::cerr << "[main] create_ring failed; trying open_ring...\n";
+    ring = open_ring(ring_path.c_str());
+    if (!ring) {
+      std::cerr << "[main] ring_create/open failed. continuing WITHOUT publishing to ring.\n";
+    } else {
+      std::cerr << "[main] opened existing ring: " << ring_path << " (buf_size=" << ring_buf_size << ")\n";
+    }
+  } else {
+    std::cerr << "[main] created ring at " << ring_path << " (buf_size=" << ring_buf_size << ")\n";
+  }
 
   // start ws reader thread
   std::thread ws_thread = start_ws_reader(symbol, updateSpeed, queue, stopFlag);
@@ -67,6 +91,17 @@ int main(int argc, char** argv) {
     }
   }
 
+  // Publish snapshot to ring (if ring available)
+  if (ring) {
+    std::string snap_str = snapshot.dump();
+    bool ok = publish_snapshot_json(ring, snap_str.c_str());
+    if (!ok) {
+      std::cerr << "[main] Warning: publish_snapshot_json failed. Will continue but consumer may not get snapshot.\n";
+    } else {
+      std::cerr << "[main] Published snapshot to ring (" << snap_str.size() << " bytes)\n";
+    }
+  }
+
   // drain buffered events and keep those after lastUpdateId
   std::vector<JsonEvent> buffered = queue.drain_all();
   std::cerr << "[main] buffered events count = " << buffered.size() << "\n";
@@ -88,6 +123,7 @@ int main(int argc, char** argv) {
       std::cerr << "[main] buffered event range does not cover snapshot+1. Exiting.\n";
       stopFlag.store(true);
       if (ws_thread.joinable()) ws_thread.join();
+      if (ring) close_ring(ring);
       return 2;
     }
   } else {
@@ -100,6 +136,21 @@ int main(int argc, char** argv) {
   std::cerr << "[main] built local book lastUpdateId=" << book.lastUpdateId() << " levels=" << book.totalLevels() << "\n";
   book.printTop(5);
 
+  // helper: publish JSON payload with small retry
+  auto publish_json_to_ring = [&](RingHandle *r, uint8_t msg_type, const std::string &s) -> bool {
+    if (!r) return false;
+    const void *data = s.data();
+    size_t len = s.size();
+    const int MAX_TRIES = 3;
+    for (int t=0;t<MAX_TRIES;++t) {
+      bool ok = publish_message(r, msg_type, data, len);
+      if (ok) return true;
+      // simple backoff
+      std::this_thread::sleep_for(std::chrono::milliseconds(10 * (t+1)));
+    }
+    return false;
+  };
+
   // apply buffered events sequentially
   size_t applied = 0;
   for (auto &ev : to_apply) {
@@ -108,8 +159,18 @@ int main(int argc, char** argv) {
       std::cerr << "[main] gap detected while applying buffered events. Need to resync. Exiting.\n";
       stopFlag.store(true);
       if (ws_thread.joinable()) ws_thread.join();
+      if (ring) close_ring(ring);
       return 3;
     }
+
+    // publish buffered event to ring as DEPTH_UPDATE (type=1)
+    if (ring) {
+      std::string evs = ev.j.dump();
+      if (!publish_json_to_ring(ring, 1, evs)) {
+        std::cerr << "[main] Warning: failed to publish buffered event to ring after retries\n";
+      }
+    }
+
     ++applied;
   }
   std::cerr << "[main] applied " << applied << " buffered events. book_update_id now = " << book.lastUpdateId() << "\n";
@@ -135,6 +196,15 @@ int main(int argc, char** argv) {
       stopFlag.store(true);
       break;
     }
+
+    // publish live depthUpdate to ring (type=1)
+    if (ring) {
+      std::string evs = ev.j.dump();
+      if (!publish_json_to_ring(ring, 1, evs)) {
+        std::cerr << "[main] Warning: failed to publish live event to ring after retries\n";
+      }
+    }
+
     book.printTop(5);
     ++liveCounter;
     if (liveCounter % 10000 == 0) {
@@ -145,6 +215,10 @@ int main(int argc, char** argv) {
 
   stopFlag.store(true);
   if (ws_thread.joinable()) ws_thread.join();
+  if (ring) {
+    close_ring(ring);
+    std::cerr << "[main] closed ring\n";
+  }
   std::cerr << "[main] exiting.\n";
   return 0;
 }
