@@ -224,6 +224,22 @@ namespace aether { namespace ring {
     uint64_t ring_get_tail(RingHandleC* ch) { return ch ? ch->h->tail->load(std::memory_order_acquire) : 0; }
     uint64_t ring_get_buf_size(RingHandleC* ch) { return ch ? ch->h->buf_size : 0; }
 
+    // Return pointer to the circular buffer region (consumer C code expects a void*)
+    void* ring_get_buffer_ptr(struct RingHandleC* ch) {
+      if (!ch || !ch->h) return nullptr;
+      aether::ring::RingHandle *impl = ch->h;
+      return impl->buf_base;
+    }
+
+    // Atomically set the tail for the consumer. Use release ordering so producer sees progress.
+    void ring_set_tail(struct RingHandleC* ch, uint64_t new_tail) {
+      if (!ch || !ch->h) return;
+      aether::ring::RingHandle *impl = ch->h;
+      if (impl->tail) {
+        impl->tail->store(new_tail, std::memory_order_release);
+      }
+    }
+
   } // extern C
 
 }} // namespace aether::ring

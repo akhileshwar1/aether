@@ -58,6 +58,8 @@ namespace aether { namespace ring {
     uint64_t ring_get_head(struct RingHandleC* ch);
     uint64_t ring_get_tail(struct RingHandleC* ch);
     uint64_t ring_get_buf_size(struct RingHandleC* ch);
+    void* ring_get_buffer_ptr(struct RingHandleC* ch);
+    void ring_set_tail(struct RingHandleC* ch, uint64_t new_tail);
   } // extern "C"
 
 }} // namespace
